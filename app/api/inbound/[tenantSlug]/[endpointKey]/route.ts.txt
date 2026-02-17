@@ -1,0 +1,51 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+
+export async function POST(req: NextRequest, { params }: { params: { tenantSlug: string; endpointKey: string } }) {
+    try {
+        const { tenantSlug, endpointKey } = params;
+        const body = await req.json();
+
+        // Find tenant by slug
+        const tenant = await prisma.tenant.findUnique({
+            where: { slug: tenantSlug },
+        });
+
+        if (!tenant) {
+            return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
+        }
+
+        // Find endpoint by URL key
+        const endpoint = await prisma.inboundEndpoint.findFirst({
+            where: {
+                tenantId: tenant.id,
+                url: endpointKey,
+                isActive: true,
+            },
+        });
+
+        if (!endpoint) {
+            return NextResponse.json({ error: 'Endpoint not found or inactive' }, { status: 404 });
+        }
+
+        // Log the inbound event
+        const event = await prisma.inboundEvent.create({
+            data: {
+                tenantId: tenant.id,
+                inboundEndpointId: endpoint.id,
+                payload: body,
+                status: 'pending',
+            },
+        });
+
+        return NextResponse.json({
+            success: true,
+            eventId: event.id,
+            message: 'Webhook received successfully'
+        }, { status: 200 });
+
+    } catch (error) {
+        console.error('Webhook Error:', error);
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    }
+}

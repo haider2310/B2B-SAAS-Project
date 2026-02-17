@@ -1,0 +1,687 @@
+// CRM SaaS Database Schema
+// Multi-tenant CRM with automation and integration capabilities
+
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  SALES_REP
+  SUPPORT_AGENT
+  VIEWER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+  ABANDONED
+}
+
+enum DealStage {
+  PROSPECTING
+  QUALIFICATION
+  PROPOSAL
+  NEGOTIATION
+  CLOSED
+}
+
+enum CallType {
+  INBOUND
+  OUTBOUND
+  MISSED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OutboundDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  RETRYING
+}
+
+// ============================================================
+// TENANT (Multi-tenancy)
+// ============================================================
+
+model Tenant {
+  id     String  @id @default(cuid())
+  name   String
+  slug   String  @unique
+  domain String?
+  logo   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users                        User[]
+  companies                    Company[]
+  contacts                     Contact[]
+  leads                        Lead[]
+  deals                        Deal[]
+  calls                        Call[]
+  tickets                      Ticket[]
+  tasks                        Task[]
+  notes                        Note[]
+  activityLogs                 ActivityLog[]
+  inboundEndpoints             InboundEndpoint[]
+  inboundEvents                InboundEvent[]
+  outboundWebhookSubscriptions OutboundWebhookSubscription[]
+  outboundDeliveries           OutboundDelivery[]
+
+  @@index([slug])
+  @@map("tenants")
+}
+
+// ============================================================
+// USER
+// ============================================================
+
+model User {
+  id       String @id @default(cuid())
+  tenantId String
+
+  email    String
+  name     String?
+  password String? // Hashed password
+  role     UserRole @default(SALES_REP)
+  avatar   String?
+
+  emailVerified DateTime?
+  image         String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  accounts      Account[]
+  sessions      Session[]
+
+  createdCompanies Company[]     @relation("CompanyCreator")
+  createdContacts  Contact[]     @relation("ContactCreator")
+  createdLeads     Lead[]        @relation("LeadCreator")
+  createdDeals     Deal[]        @relation("DealCreator")
+  createdCalls     Call[]        @relation("CallCreator")
+  createdTickets   Ticket[]      @relation("TicketCreator")
+  assignedTickets  Ticket[]      @relation("TicketAssignee")
+  createdTasks     Task[]        @relation("TaskCreator")
+  assignedTasks    Task[]        @relation("TaskAssignee")
+  createdNotes     Note[]
+  activityLogs     ActivityLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+  @@map("users")
+}
+
+// ============================================================
+// NEXTAUTH ADAPTER MODELS
+// ============================================================
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String?
+  access_token       String?
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String?
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// COMPANY
+// ============================================================
+
+model Company {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name        String
+  website     String?
+  industry    String?
+  size        String?
+  description String?
+  address     String?
+  city        String?
+  state       String?
+  country     String?
+  zipCode     String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String
+
+  // Relations
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User   @relation("CompanyCreator", fields: [createdById], references: [id])
+
+  contacts Contact[]
+  leads    Lead[]
+  deals    Deal[]
+
+  @@index([tenantId])
+  @@index([createdById])
+  @@map("companies")
+}
+
+// ============================================================
+// CONTACT
+// ============================================================
+
+model Contact {
+  id       String @id @default(cuid())
+  tenantId String
+
+  companyId String?
+
+  firstName String
+  lastName  String
+  email     String?
+  phone     String?
+  mobile    String?
+  position  String?
+
+  linkedInUrl String?
+  twitterUrl  String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String
+
+  // Relations
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  createdBy User     @relation("ContactCreator", fields: [createdById], references: [id])
+
+  leads   Lead[]
+  deals   Deal[]
+  calls   Call[]
+  tickets Ticket[]
+  tasks   Task[]
+  notes   Note[]
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([createdById])
+  @@index([email])
+  @@map("contacts")
+}
+
+// ============================================================
+// LEAD
+// ============================================================
+
+model Lead {
+  id       String @id @default(cuid())
+  tenantId String
+
+  companyId String?
+  contactId String?
+
+  source      String?
+  status      LeadStatus @default(NEW)
+  value       Float? // Monetary value in decimal
+  name        String?
+  email       String? @unique
+  description String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  // Relations
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  createdBy User?    @relation("LeadCreator", fields: [createdById], references: [id])
+
+  deals Deal[]
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([createdById])
+  @@index([status])
+  @@map("leads")
+}
+
+// ============================================================
+// DEAL
+// ============================================================
+
+model Deal {
+  id       String @id @default(cuid())
+  tenantId String
+
+  companyId String?
+  contactId String?
+  leadId    String?
+
+  title       String
+  value       Float // Monetary value in decimal
+  status      DealStatus @default(OPEN)
+  stage       DealStage  @default(PROSPECTING)
+  probability Int        @default(0) // 0-100
+
+  expectedCloseDate DateTime?
+  closedDate        DateTime?
+
+  description String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String
+
+  // Relations
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdBy User     @relation("DealCreator", fields: [createdById], references: [id])
+
+  calls Call[]
+  tasks Task[]
+  notes Note[]
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([leadId])
+  @@index([createdById])
+  @@index([status])
+  @@index([stage])
+  @@map("deals")
+}
+
+// ============================================================
+// CALL
+// ============================================================
+
+model Call {
+  id       String @id @default(cuid())
+  tenantId String
+
+  contactId String?
+  dealId    String?
+
+  type         CallType
+  duration     Int? // in seconds
+  notes        String?
+  recordingUrl String?
+
+  scheduledAt DateTime?
+  completedAt DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String
+
+  // Relations
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  createdBy User     @relation("CallCreator", fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([createdById])
+  @@index([scheduledAt])
+  @@map("calls")
+}
+
+// ============================================================
+// TICKET
+// ============================================================
+
+model Ticket {
+  id       String @id @default(cuid())
+  tenantId String
+
+  contactId String?
+
+  title       String
+  description String?
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+
+  resolvedAt DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdById  String
+  assignedToId String?
+
+  // Relations
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact    Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  createdBy  User     @relation("TicketCreator", fields: [createdById], references: [id])
+  assignedTo User?    @relation("TicketAssignee", fields: [assignedToId], references: [id])
+
+  tasks Task[]
+  notes Note[]
+
+  @@index([tenantId])
+  @@index([contactId])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([priority])
+  @@map("tickets")
+}
+
+// ============================================================
+// TASK
+// ============================================================
+
+model Task {
+  id       String @id @default(cuid())
+  tenantId String
+
+  contactId String?
+  dealId    String?
+  ticketId  String?
+
+  title       String
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdById  String
+  assignedToId String?
+
+  // Relations
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact    Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal       Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  ticket     Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdBy  User     @relation("TaskCreator", fields: [createdById], references: [id])
+  assignedTo User?    @relation("TaskAssignee", fields: [assignedToId], references: [id])
+
+  @@index([tenantId])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([ticketId])
+  @@index([createdById])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+// ============================================================
+// NOTE
+// ============================================================
+
+model Note {
+  id       String @id @default(cuid())
+  tenantId String
+
+  contactId String?
+  dealId    String?
+  ticketId  String?
+
+  content String
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String
+
+  // Relations
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([ticketId])
+  @@index([createdById])
+  @@map("notes")
+}
+
+// ============================================================
+// ACTIVITY LOG
+// ============================================================
+
+model ActivityLog {
+  id       String @id @default(cuid())
+  tenantId String
+
+  userId String?
+
+  action     String // e.g., "contact.created", "deal.won"
+  entityType String // e.g., "Contact", "Deal"
+  entityId   String
+  metadata   Json? // Additional context
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+// ============================================================
+// INBOUND ENDPOINT (Webhook/API Integration)
+// ============================================================
+
+model InboundEndpoint {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name          String
+  endpointKey   String  @unique // V3.0: Specific key for the URL
+  url           String? // Legacy or descriptive URL
+  authType      String  @default("NONE") // V3.0: HMAC, API_KEY, NONE
+  secretHash    String?
+  dedupeConfig  Json?   // V3.0: Configuration for deduplication
+  mappingConfig Json    // Field mapping configuration
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inboundEvents InboundEvent[]
+
+  @@index([tenantId])
+  @@index([isActive])
+  @@index([endpointKey])
+  @@map("inbound_endpoints")
+}
+
+// ============================================================
+// INBOUND EVENT
+// ============================================================
+
+model InboundEvent {
+  id       String @id @default(cuid())
+  tenantId String
+
+  inboundEndpointId String
+
+  payload     Json
+  headers     Json?   // V3.0: Store headers for debugging
+  sourceIp    String? // V3.0: Audit
+  processedAt DateTime?
+  status      String // "pending", "processed", "failed"
+  error       String?
+  
+  resultStatus      String? // V3.0: Detailed result (accepted, rejected)
+  createdEntityRefs Json?   // V3.0: Links to created entities
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inboundEndpoint InboundEndpoint @relation(fields: [inboundEndpointId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([inboundEndpointId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("inbound_events")
+}
+
+// ============================================================
+// OUTBOUND WEBHOOK SUBSCRIPTION
+// ============================================================
+
+model OutboundWebhookSubscription {
+  id       String @id @default(cuid())
+  tenantId String
+
+  name       String
+  url        String // Target URL
+  authType   String  @default("NONE") // V3.0: HMAC, NONE
+  secretHash String?
+  eventTypes Json    // V3.0: Array of event types
+  enabled    Boolean @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outboundDeliveries OutboundDelivery[]
+
+  @@index([tenantId])
+  @@index([enabled])
+  @@map("outbound_webhook_subscriptions")
+}
+
+// ============================================================
+// OUTBOUND DELIVERY
+// ============================================================
+
+model OutboundDelivery {
+  id       String @id @default(cuid())
+  tenantId String
+
+  outboundWebhookSubscriptionId String
+
+  eventType     String // Event type
+  payload       Json   // Event payload
+  status        String // V3.0: pending, sent, failed, dead
+  attemptCount  Int      @default(0)
+  lastAttemptAt DateTime?
+  
+  lastResponseCode Int?    // V3.0: Audit
+  lastError        String?
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  tenant                      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outboundWebhookSubscription OutboundWebhookSubscription @relation(fields: [outboundWebhookSubscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([outboundWebhookSubscriptionId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("outbound_deliveries")
+}
