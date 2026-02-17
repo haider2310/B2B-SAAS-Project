@@ -11,7 +11,7 @@ export async function searchGlobal(query: string) {
 
     const [leads, companies, deals, contacts] = await Promise.all([
         prisma.lead.findMany({
-            where: { tenantId, OR: [{ name: { contains: query } }, { email: { contains: query } }, { company: { contains: query } }] },
+            where: { tenantId, OR: [{ name: { contains: query } }, { email: { contains: query } }, { company: { name: { contains: query } } }] },
             take: 3,
             select: { id: true, name: true, email: true }
         }),
